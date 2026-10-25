@@ -149,6 +149,10 @@ Factor (PC1)[TAB]Value
                     <input type="number" id="slopesCount" value="100" min="10" max="100000"/>
                 </div>
                 <div>
+                    <label>Разбивать по городам</label>
+                    <input type="checkbox" id="splitByCityCheck" checked/>
+                </div>
+                <div>
                     <button class="btn" id="btnRecalc">Пересчитать</button>
                 </div>
             </div>
@@ -193,6 +197,7 @@ Factor (PC1)[TAB]Value
             const elemBgText = $('bgText');
             const elemWndText = $('wndText');
             const elemSlopesCount = $('slopesCount');
+            const elemSplitByCity = $('splitByCityCheck');
             const elemTextArea = $('textAreaInput');
             const elemBtnRun = $('btnRun');
             const elemBtnRecalc = $('btnRecalc');
@@ -203,6 +208,7 @@ Factor (PC1)[TAB]Value
             let chart2 = null;
             let windowSize = 1;
             let slopesCount = 10;
+            let splitByCity = true;
             let bestSlope = 1;
             let bestIntercept = 0;
             let initIntercept = 0;
@@ -386,14 +392,22 @@ Factor (PC1)[TAB]Value
                     const cities = [...new Set(value.map(v => v.city))];
                     // console.log(`Element '${key}' contains next cities: ${cities}`);
 
-                    for (const city of cities){
-                        const cityPts = value.filter(v => v.city === city);
-
-                        //console.log('Processing city: ' + city);
-                        const result = processObject(cityPts, wnd, city);
-                        fitResults.push({element: key, city: city, slope: result.slope, intercept: result.intercept, initIntercept, slopesCount});
-                        addResultToTable(result.slope, result.intercept, city, key, initIntercept, slopesCount);
+                    if (splitByCity){
+                        for (const city of cities){
+                            const cityPts = value.filter(v => v.city === city);
+    
+                            //console.log('Processing city: ' + city);
+                            const result = processObject(cityPts, wnd, city);
+                            fitResults.push({element: key, city: city, slope: result.slope, intercept: result.intercept, initIntercept, slopesCount});
+                            addResultToTable(result.slope, result.intercept, city, key, initIntercept, slopesCount);
+                        }
+                    } else {
+                        const title = "Все";
+                        const result = processObject(value, wnd, title);
+                        fitResults.push({element: key, city: title, slope: result.slope, intercept: result.intercept, initIntercept, slopesCount});
+                        addResultToTable(result.slope, result.intercept, title, key, initIntercept, slopesCount);
                     }
+
                 }
                 addTableDelimeter();
             }
@@ -476,11 +490,13 @@ Factor (PC1)[TAB]Value
                 initIntercept = parseNumber(elemBgText.value || "") || 0;
                 slopesCount = parseNumber(elemSlopesCount.value || "") || 10;
                 windowSize = parseNumber(elemWndText.value || "") || 1;
+                splitByCity = elemSplitByCity.checked;
                 bestIntercept = initIntercept;
                 // if (windowSize > 1 && windowSize > dataPts.length)
                 // {
                 //     windowSize = Math.trunc(dataPts.length / 2);
                 // }
+                console.log(`Initial params: initBg ${initIntercept}, slopes count ${slopesCount}, wnd ${windowSize}, split flag ${splitByCity}`);
                 if (errors.length>0){
                     alert('Во входных данных есть ошибки. Проверьте их.');
                 }
@@ -500,14 +516,16 @@ Factor (PC1)[TAB]Value
 
                 recalculate();
 
-                redrawChart1(pts);
+                redrawChart1(loadedData);
                 const bestResult = processForCustomParams(pts, fitResults[fitResults.length - 1].slope, 0, windowSize);
                 redrawChart2(bestResult.slopes);
             }
 
             function recalculate(){
                 if (validateInputs() && loadedData){
-                    batchProcessing(loadedData, true, windowSize);
+                    batchProcessing(loadedData, splitByCity, windowSize);
+
+                    redrawChart1(loadedData);
                 }
             }
 
@@ -545,22 +563,7 @@ Factor (PC1)[TAB]Value
                 chart1 = new Chart(chart1Ctx, {
                     type: 'line',
                     data: {
-                        datasets: [
-                            {
-                                type: 'scatter',
-                                label: 'Source data',
-                                backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                                borderColor: 'rgba(54, 162, 235, 1)',
-                                pointRadius: 3
-                            },
-                            {
-                                type: 'line',
-                                label: 'Best Fit',
-                                borderColor: '#000000',
-                                fill: false,
-                                pointRadius: 0
-                            },
-                        ]
+                        datasets: []
                     },
                     options: {
                         responsive: false,
@@ -621,14 +624,35 @@ Factor (PC1)[TAB]Value
                 console.log('Charts are successfully initiated!');
             }
 
-            function redrawChart1(pts){
-                const x = pts.map(p => p.x);
-                const minX = Math.min(...x);
-                const maxX = Math.max(...x);
-                const fitPts = [{x: minX, y: minX * bestSlope + bestIntercept}, {x: maxX, y: maxX * bestSlope + bestIntercept}];
+            function redrawChart1(data){
+                chart1.data.labels = [];
+                chart1.data.datasets = [];
 
-                chart1.data.datasets[0].data = pts;
-                chart1.data.datasets[1].data = fitPts;
+                for (const [key, value] of Object.entries(data)){
+                    const cities = [...new Set(value.map(v => v.city))];
+                    for (const city of cities){
+                        const pts = value.filter(v => v.city === city);
+                        chart1.data.datasets.push({
+                            label: key + '/' + city,
+                            type:'scatter',
+                            pointRadius: 3,
+                            data: pts,
+                        });
+
+                        const x = pts.map(p => p.x);
+                        const minX = Math.min(...x);
+                        const maxX = Math.max(...x);
+                        const curFit= fitResults.filter(f => f.element === key && f.city === city)[0];
+                        const fitPts = [{x: minX, y: minX * curFit.slope + curFit.intercept}, {x: maxX, y: maxX * curFit.slope + curFit.intercept}];
+                        
+                        chart1.data.datasets.push({
+                            label: 'Fit: ' + key + '/' + city,
+                            type: 'line',
+                            pointRadius: 0,
+                            data: fitPts,
+                        });
+                    }
+                }
                 chart1.update();
             }
 
