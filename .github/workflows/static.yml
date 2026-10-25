@@ -27,7 +27,7 @@ jobs:
 
       - name: Prepare site
         run: |
-          cp 'RadonSeriesFitByFlag.html' index.html
+          cp 'index.html' index.html
 
       - uses: actions/upload-pages-artifact@v3
         with:
