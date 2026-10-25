@@ -1,0 +1,621 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>Searcher</title>
+        <style>
+            :root {
+                --text: #ffffff;
+                --muted: #757575;
+                --border: #c1c1c1;
+                --border-radius: 8px; 
+            }
+            * {
+                box-sizing: border-box;
+            }
+
+            body {
+                margin: 0;
+                font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                padding: 8px;
+            }
+
+            .card {
+                padding: 12px;
+                border: 1px solid var(--border);
+                border-radius: var(--border-radius);
+                gap: 12px;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .card h1 {
+                margin: 0;
+                padding: 0;
+                font-size: 21px;
+
+            }
+
+            .chart-wrapper {
+                max-height: 80vh;
+                position: relative;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+            }
+
+            canvas {
+                width: 100%;
+                height: 100%;
+                display: block;
+            }
+            .footer {
+                font-size: 12px;
+            }
+
+            .table {
+                width:100%; 
+                border-collapse:collapse;
+            }
+
+            .table thead tr th {
+                text-align: start;
+            }
+            .top-section {
+                display: grid;
+                grid-template-columns: 1.5fr 0.8fr;
+                gap: 8px;
+            }
+
+            textarea {
+                width: 100%;
+                height: 35vh;
+            }
+        </style>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.6.1"></script>
+        <script src="scripts/xlsx.full.min.js"></script>
+    </head>
+
+    <body>
+        <section class="top-section">
+            <div class="card">
+                <h1>Входные данные</h1>
+                <textarea id="textAreaInput" placeholder="Вставьте сюда набор данных из Excel. Формат данных:
+
+City[TAB]Factor (PC1)[TAB]Value
+Екатеринбург[TAB]-0,559384456[TAB]13,76194065
+Екатеринбург[TAB]-0,670578591[TAB]15,41882927
+Екатеринбург[TAB]-0,307987759[TAB]21,97274371
+...
+
+или
+
+Factor (PC1)[TAB]Value[TAB][Flag]
+-0,559384456[TAB]13,76194065
+-0,670578591[TAB]15,41882927
+-0,307987759[TAB]21,97274371
+...
+
+[TAB] - табуляция - разделитель колонок. Подставляется автоматически при копировании и вставке из Excel">
+</textarea>
+                <div>
+                    <button class="btn" id="btnRun">Запуск</button>
+                    <span class="progress-text" id="progressText"></span>
+                </div>
+                <div>
+                    <label>Либо выберите Excel-файл</label>
+                    <input type="file" id="excelFile" accept=".xlsx, .xls" />
+                </div>
+            </div>
+            
+            <div class="card">
+                <h1>Параметры</h1>
+                <div>
+                    <label>Базовый уровень фона</label>
+                    y(x) = <input type="number" id="bgText" value="0"/> + kx
+                </div>
+                <div>
+                    <label>Окно скользящего среднего</label>
+                    <input type="number" id="wndText" value="6" min="2"/>
+                </div>
+
+                <div>
+                    <label>Число разбиений для поиска наклона</label>
+                    <input type="number" id="slopesCount" value="100" min="10" max="100000"/>
+                </div>
+            </div>
+        </section>
+
+        
+
+        <div class="chart-wrapper">
+            <canvas id="chart1"></canvas>
+            <canvas id="chart2"></canvas>
+        </div>
+
+        <div class="card">
+            <h1>Результаты</h1>
+            <div>
+                <table class="table" id="resultsTable">
+                    <thead>
+                        <tr>
+                            <th>Элемент</th>
+                            <th>Город</th>
+                            <th>Наклон</th>
+                            <th>Отрезок</th>
+                            <th>Начальный ур. фона</th>
+                            <th>Число разбиений</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="footer">
+
+        </div>
+
+        <script>
+            const $ = (name) => document.getElementById(name);
+            const elemChart1 = $('chart1');
+            const elemChart2 = $('chart2');
+            const chart1Ctx = elemChart1.getContext("2d");
+            const chart2Ctx = elemChart2.getContext("2d");
+            const elemBgText = $('bgText');
+            const elemWndText = $('wndText');
+            const elemSlopesCount = $('slopesCount');
+            const elemTextArea = $('textAreaInput');
+            const elemBtnRun = $('btnRun');
+            const elemProgressText = $('progressText');
+            const elemExcelInput = $('excelFile');
+            const elemTableBody = document.querySelector("#resultsTable tbody");
+            
+            let chart1 = null;
+            let chart2 = null;
+            let windowSize = 1;
+            let slopesCount = 10;
+            let bestSlope = 1;
+            let bestIntercept = 0;
+            let initIntercept = 0;
+            let loadedData = {};
+            let fitResults = [];
+
+            function linearFit(X, Y){
+                const n = X.length;
+                if (n !== Y.length) throw new Error("X and Y arrays must be of equal length.");
+                if (n === 0) return { slope: 0, intercept: 0, seSlope: 0, seIntercept: 0, rSquared: 0 };
+                if (n < 3) {
+                    throw new Error("At least 3 data points are required for linear fit. Current points count is " + String(n));
+                }
+
+                let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+
+                for (let i = 0; i < n; i++) {
+                    sumX += X[i];
+                    sumY += Y[i];
+                    sumXY += X[i] * Y[i];
+                    sumXX += X[i] * X[i];
+                }
+
+                const denominator = n * sumXX - sumX * sumX;
+                if (denominator === 0) {
+                    throw new Error("All X values are identical; slope is undefined.");
+                }
+
+                // Calculate slope (m) and y-intercept (b)
+                const slope = (n * sumXY - sumX * sumY) / denominator;
+                const intercept = (sumY - slope * sumX) / n;
+
+                const meanY = sumY / n;
+                let ssRes = 0; // Сумма квадратов остатков
+                let ssTot = 0; // Общая сумма квадратов
+
+                for (let i = 0; i < n; i++) {
+                    const yPred = slope * X[i] + intercept;
+                    ssRes += Math.pow(Y[i] - yPred, 2);
+                    ssTot += Math.pow(Y[i] - meanY, 2);
+                }
+
+                const rSquared = ssTot === 0 ? 1 : 1 - (ssRes / ssTot);
+                const sE = Math.sqrt(ssRes / (n - 2));
+                const sumSqDevX = denominator / n;
+                const seSlope = sE / Math.sqrt(sumSqDevX);
+                const seIntercept = sE * Math.sqrt((1 / n) + Math.pow(sumX / n, 2) / sumSqDevX);
+
+                return {
+                    slope: slope,
+                    intercept: intercept,
+                    seSlope,
+                    seIntercept,
+                    predict: (x) => slope * x + intercept
+                }
+            }
+
+            function movingAvgSlope(devs, wnd = 3){
+                if (!devs){
+                    throw new Error('Array is not defined or null');
+                }
+
+                if (devs.length === 0){
+                    throw new Error('Points array is empty');
+                }
+
+                if (wnd < 1) throw new Error('Invalid window size');
+
+                const slopes = [];
+                const sortedDevs = [...devs].sort((a, b) => a - b);
+                const hwnd = Math.max(2, Math.trunc(wnd / 2));
+                for (let i = hwnd; i < sortedDevs.length; i++){
+                    const startIdx = Math.max(i - hwnd, 0); // Защита от выхода за левую границу массива
+                    const endIdx = Math.min(i + hwnd, sortedDevs.length - 1); // Защита от выхода за правую границу массива
+                    const length = endIdx - startIdx;
+
+                    if (length < 3) continue;
+
+                    const _x = sortedDevs.slice(startIdx, endIdx);
+                    const dummyY = [];
+                    for (let j = 1; j < length + 1; j++) {
+                        dummyY.push(j);
+                    }
+
+                    const regr = linearFit(_x, dummyY);
+                    if (regr){
+                        slopes.push({x: sortedDevs[i], y: regr.slope});
+                    }
+                }
+
+                let maxSlopeIdx = 0;
+                for (let i = 0; i < slopes.length; i++){
+                    if (slopes[i].y > slopes[maxSlopeIdx].y){
+                        maxSlopeIdx = i;
+                    }
+                }
+
+                return {
+                    slopes,
+                    idx: maxSlopeIdx,
+                    maxSlopeDev: slopes[maxSlopeIdx].x,
+                    maxSlope: slopes[maxSlopeIdx].y,
+                };
+            }
+
+            function processForCustomParams(pts, slope, intercept, wnd = 2){
+                const bgVals = pts.map(p => p.x * slope + intercept);   // Первичная оценка фоновых значений
+                const yDevs = pts.map((p, index) => p.y - bgVals[index]);   // Отклонения Y от фоновых значений
+                return movingAvgSlope(yDevs, wnd);
+            }
+
+            function getSlopesRange(pts, count){
+                // const maxPoint = pts.reduce((max, current) => current.y > max.y ? current : max, pts[0]);
+                const minByXPoint = pts.reduce((min, current) => current.x < min.x ? current : min, pts[0]);
+                const x = pts.map(p => p.x);
+                const y = pts.map(p => p.y);
+                const minX = Math.min(...x);
+                const minY = Math.min(...y);
+
+                let maxSlope = -Infinity;
+                let minSlope = Infinity;
+                for (let i = 0; i < pts.length; i++){
+                    const dx = pts[i].x - minByXPoint.x;
+                    if (dx === 0) continue;
+
+                    const slope = (pts[i].y - minByXPoint.y) / dx;
+                    if (slope > maxSlope){
+                        maxSlope = slope;
+                    }
+                    if (slope < minSlope){
+                        minSlope = slope;
+                    }
+                }
+
+                const slopesRange = [];
+                const slopeStep = (maxSlope - minSlope) / count;
+                for (let i = 0; i < count; i++){
+                    slopesRange.push(minSlope + i * slopeStep);
+                }
+                
+                return slopesRange;
+            }
+
+            function searchBestParams(pts, count = 1, wnd = 2){
+                if (!pts) throw new Error("Array is empty.");
+                
+                let i = 0;
+                const slopesRange = getSlopesRange(pts, count);
+                // const slopesRange = [1.35];
+
+                const maxValue = {maxSlope: -Infinity, idx: -1, intercept: 0, slope: 0};
+                for (const currentSlope of slopesRange){
+                    const result = processForCustomParams(pts, currentSlope, 0, wnd);
+
+                    // console.log(`Search step ${i + 1}. Current slope: ${currentSlope}, Max Deviation: ${result.maxSlopeDev}, Max Slope: ${result.maxSlope}`);
+                    if (result.maxSlope > maxValue.maxSlope){
+                        maxValue.idx = result.idx;  // Индекс максимального элемента на графике плотности
+                        maxValue.maxSlope = result.maxSlope; // Значение максимального элемента на графике плотности для оптимального наклона
+                        maxValue.intercept = result.maxSlopeDev;
+                        maxValue.slope = currentSlope;
+                    }
+                    i++;
+                }
+                console.log(`Slope was found in range: ${slopesRange[0]} to ${slopesRange[slopesRange.length-1]} with step ${slopesRange[1] - slopesRange[0]}`);
+                return maxValue;
+            }
+
+            function processObject(pts, wnd, title='-'){
+                const bestParams = searchBestParams(pts, slopesCount, wnd);
+                bestSlope = bestParams.slope;
+                bestIntercept = bestParams.intercept;
+
+                console.log(`Best parameters for '${title}': slope = ${bestParams.slope}, intercept = ${bestParams.intercept}`);
+  
+                elemProgressText.textContent = "Готов";
+
+                return bestParams;
+            }
+
+            function batchProcessing(data, splitByCity = true, wnd = 2){
+                for (const [key, value] of Object.entries(data)){
+                    // console.log('Processing element: ' + key);
+                    const cities = [...new Set(value.map(v => v.city))];
+                    // console.log(`Element '${key}' contains next cities: ${cities}`);
+
+                    for (const city of cities){
+                        const cityPts = value.filter(v => v.city === city);
+
+                        //console.log('Processing city: ' + city);
+                        const result = processObject(cityPts, wnd, city);
+                        fitResults.push({element: key, city: city, slope: result.slope, intercept: result.intercept, initIntercept, slopesCount});
+                        addResultToTable(result.slope, result.intercept, city, key, initIntercept, slopesCount);
+                    }
+                }
+            }
+
+            function parseNumber(s) {
+                if (s == null) return NaN;
+                const v = String(s).trim().replace(/,/g, ".");
+                if (!v) return NaN;
+                return Number(v);
+            }
+
+            function parseLines(lines){
+                const pts = [];
+                for(const line of lines){
+                    const parts = line.split('\t').map(s => s.trim());
+                    let city = null;
+                    let val1, val2 = null;
+
+                    if (parts.length === 2){
+                        val1 = parseNumber(parts[0]);
+                        val2 = parseNumber(parts[1]);
+                    }
+
+                    if (parts.length === 3){
+                        city = parts[0];
+                        val1 = parseNumber(parts[1]);
+                        val2 = parseNumber(parts[2]);
+                    }
+                    
+
+                    if (!isFinite(val1) || !isFinite(val2)) continue;
+
+                    pts.push({x: val1, y: val2, city: city || ''});
+                }
+                return pts;
+            }
+
+            function readLines(){
+                return String(elemTextArea.value || "").split('\n').map(line => line.trim());
+            }
+
+            function readExcel(file){
+                const reader = new FileReader();
+                const acceptedSheetNames = ['Pb', 'Mn'];
+
+                reader.onload = function(e) {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+
+                    const elementsData = {}
+                    // Считываем все листы
+                    for (const sheet of workbook.SheetNames){
+                        if (!acceptedSheetNames.includes(sheet)) continue;
+
+                        const worksheet = workbook.Sheets[sheet];
+                        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 'A'});
+
+                        const extractedData = rows.map(row => ({
+                            city: row.B || '', // Если ячейка пустая, вернет пустую строку
+                            factor: row.C || '',
+                            value: row.N || ''
+                        }));
+
+                        // Оставляем только корректные данные (без пропусков)
+                        const filteredData = extractedData.filter(row => isFinite(row.factor) && isFinite(row.value) && Number(row.value));
+                        console.log(`Read sheet '${sheet}'. Found correct ${filteredData.length}/${extractedData.length} lines`);
+                        elementsData[sheet] = filteredData.map(v => ({x: v.factor, y: v.value, city: v.city}));
+                    }
+
+                    loadedData = elementsData;
+                    recalculate();
+                };
+
+                reader.readAsArrayBuffer(file);
+            }
+
+            function validateInputs(){
+                let hasErrors = false;
+                initIntercept = parseNumber(elemBgText.value || "") || 0;
+                slopesCount = parseNumber(elemSlopesCount.value || "") || 10;
+                windowSize = parseNumber(elemWndText.value || "") || 1;
+                bestIntercept = initIntercept;
+                // if (windowSize > 1 && windowSize > dataPts.length)
+                // {
+                //     windowSize = Math.trunc(dataPts.length / 2);
+                // }
+                if (hasErrors){
+                    alert('Во входных данных есть ошибки. Проверьте их.');
+                }
+                return true;
+            }
+            
+            function loadDataFromInput(){
+                const lines = readLines();
+
+                if (!elemTextArea.value || lines.length === 1){
+                    alert('Сначала вставьте данные');
+                    return;
+                }
+
+                const pts = parseLines(lines);
+                loadedData = {'-': pts };
+
+                recalculate();
+
+                redrawChart1(pts);
+                const bestResult = processForCustomParams(pts, fitResults[fitResults.length - 1].slope, 0, windowSize);
+                redrawChart2(bestResult.slopes);
+            }
+
+            function recalculate(){
+                if (validateInputs() && loadedData){
+                    batchProcessing(loadedData, true, windowSize);
+                }
+            }
+
+            function addResultToTable(slope, intercept, city, element, bg, count){
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${element}</td>
+                    <td>${city}</td>
+                    <td>${slope.toLocaleString()}</td>
+                    <td>${intercept.toLocaleString()}</td>
+                    <td>${bg}</td>
+                    <td>${count}</td>
+                `;
+                elemTableBody.appendChild(tr);
+            }
+
+            function clearResultsTable(){
+                elemTableBody.innerHTML = "";
+            }
+
+            function initCharts(){
+                chart1 = new Chart(chart1Ctx, {
+                    type: 'line',
+                    data: {
+                        datasets: [
+                            {
+                                type: 'scatter',
+                                label: 'Source data',
+                                backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                                borderColor: 'rgba(54, 162, 235, 1)',
+                                pointRadius: 3
+                            },
+                            {
+                                type: 'line',
+                                label: 'Best Fit',
+                                borderColor: '#000000',
+                                fill: false,
+                                pointRadius: 0
+                            },
+                        ]
+                    },
+                    options: {
+                        responsive: false,
+                        scales: {
+                            'x': {
+                                type: 'linear',
+                                position: 'bottom',
+                                title: {
+                                    display: true,
+                                    text: ''
+                                },                            
+                            },
+                            'y': {
+                                type: 'linear',
+                                title: {
+                                    display: true,
+                                    text: ''
+                                }
+                            }
+                        }
+                    }
+                });
+
+                chart2 = new Chart(chart2Ctx, {
+                    type: 'line',
+                    data: {
+                        datasets: [
+                            {
+                                type: 'line',
+                                label: 'Slope vs Diff',
+                                backgroundColor: 'rgba(220, 38, 38, 0.6)',
+                                borderColor: 'rgba(220, 38, 38, 1)',
+                                pointRadius: 3
+                            },
+                        ]
+                    },
+                    options: {
+                        responsive: false,
+                        scales: {
+                            'x': {
+                                type: 'linear',
+                                position: 'bottom',
+                                title: {
+                                    display: true,
+                                    text: ''
+                                },
+                            'y': {
+                                type: 'linear',
+                                title: {
+                                    display: true,
+                                    text: ''
+                                }
+                            }
+                            }
+                        }
+                    }
+                });
+                console.log('Charts are successfully initiated!');
+            }
+
+            function redrawChart1(pts){
+                const x = pts.map(p => p.x);
+                const minX = Math.min(...x);
+                const maxX = Math.max(...x);
+                const fitPts = [{x: minX, y: minX * bestSlope + bestIntercept}, {x: maxX, y: maxX * bestSlope + bestIntercept}];
+
+                chart1.data.datasets[0].data = pts;
+                chart1.data.datasets[1].data = fitPts;
+                chart1.update();
+            }
+
+            function redrawChart2(pts){
+                chart2.data.datasets[0].data = pts;
+                chart2.update();
+            }
+
+            elemBtnRun.addEventListener('click', e => {
+                loadDataFromInput();
+            });
+
+            elemExcelInput.addEventListener('change', e => {
+                readExcel(e.target.files[0]);
+            });
+
+            window.addEventListener('resize', e => {
+                elemProgressText.textContent = "Готов к работе.";
+                if (chart1){
+                    chart1.update();
+                }
+                if (chart2){
+                    chart2.update();
+                }
+            });
+
+            initCharts();
+        </script>
+    </body>
+</html>
