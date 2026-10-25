@@ -22,6 +22,15 @@
             .btn {
                 padding: 6px 10px;
             }
+
+            .buttons-wrapper{
+                display: flex;
+                flex-direction: row;
+                width: 100%;
+                gap: 12px;
+                justify-content: space-between;
+            }
+
             .card {
                 padding: 12px;
                 border: 1px solid var(--border);
@@ -51,8 +60,22 @@
                 height: 100%;
                 display: block;
             }
+
+            .file-input-wrapper {
+                margin: auto 0;
+                gap: 8px;
+            }
+
             .footer {
                 font-size: 12px;
+            }
+
+            .mb-8 {
+                margin-bottom: 8px;
+            }
+
+            .mt-8 {
+                margin-top: 8px;
             }
 
             .table {
@@ -92,7 +115,7 @@ City[TAB]Factor (PC1)[TAB]Value
 
 или
 
-Factor (PC1)[TAB]Value[TAB][Flag]
+Factor (PC1)[TAB]Value
 -0,559384456[TAB]13,76194065
 -0,670578591[TAB]15,41882927
 -0,307987759[TAB]21,97274371
@@ -100,13 +123,13 @@ Factor (PC1)[TAB]Value[TAB][Flag]
 
 [TAB] - табуляция - разделитель колонок. Подставляется автоматически при копировании и вставке из Excel">
 </textarea>
-                <div>
+                <div class="buttons-wrapper">
                     <button class="btn" id="btnRun">Расчет по данным поля ввода</button>
-                    <span class="progress-text" id="progressText"></span>
-                </div>
-                <div>
-                    <label>Либо выберите Excel-файл</label>
-                    <input type="file" id="excelFile" accept=".xlsx, .xls" />
+
+                    <div class="file-input-wrapper">
+                        <label>либо выберите Excel-файл</label>
+                        <input type="file" id="excelFile" accept=".xlsx, .xls" />
+                    </div>
                 </div>
             </div>
             
@@ -131,14 +154,7 @@ Factor (PC1)[TAB]Value[TAB][Flag]
             </div>
         </section>
 
-        
-
-        <div class="chart-wrapper">
-            <canvas id="chart1"></canvas>
-            <canvas id="chart2"></canvas>
-        </div>
-
-        <div class="card">
+        <section class="card mt-8 mb-8">
             <h1>Результаты</h1>
             <div>
                 <table class="table" id="resultsTable">
@@ -149,7 +165,7 @@ Factor (PC1)[TAB]Value[TAB][Flag]
                             <th>Наклон</th>
                             <th>Отрезок</th>
                             <th>Начальный ур. фона</th>
-                            <th>Число разбиений</th>
+                            <th>Число разбиений для поиска</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -157,11 +173,16 @@ Factor (PC1)[TAB]Value[TAB][Flag]
                     </tbody>
                 </table>
             </div>
-        </div>
+        </section>
 
-        <div class="footer">
+        <section class="chart-wrapper">
+            <canvas id="chart1"></canvas>
+            <canvas id="chart2"></canvas>
+        </section>
 
-        </div>
+        <section class="footer">
+
+        </section>
 
         <script>
             const $ = (name) => document.getElementById(name);
@@ -175,7 +196,6 @@ Factor (PC1)[TAB]Value[TAB][Flag]
             const elemTextArea = $('textAreaInput');
             const elemBtnRun = $('btnRun');
             const elemBtnRecalc = $('btnRecalc');
-            const elemProgressText = $('progressText');
             const elemExcelInput = $('excelFile');
             const elemTableBody = document.querySelector("#resultsTable tbody");
             
@@ -356,8 +376,6 @@ Factor (PC1)[TAB]Value[TAB][Flag]
                 bestIntercept = bestParams.intercept;
 
                 console.log(`Best parameters for '${title}': slope = ${bestParams.slope}, intercept = ${bestParams.intercept}`);
-  
-                elemProgressText.textContent = "Готов";
 
                 return bestParams;
             }
@@ -630,7 +648,6 @@ Factor (PC1)[TAB]Value[TAB][Flag]
             });
 
             window.addEventListener('resize', e => {
-                elemProgressText.textContent = "Готов к работе.";
                 if (chart1){
                     chart1.update();
                 }
