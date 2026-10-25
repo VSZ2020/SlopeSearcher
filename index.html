@@ -419,7 +419,7 @@ Factor (PC1)[TAB]Value[TAB][Flag]
 
             function readExcel(file){
                 const reader = new FileReader();
-                const acceptedSheetNames = ['Pb', 'Mn'];
+                const acceptedSheetNames = ['Pb', 'Mn', 'Zn', 'Cu', 'Tl', 'Al', 'Li', 'Sc', 'V', 'Cr', 'Fe', 'Co', 'Ni', 'Be', 'Mg', 'As', 'Mo', 'Ag', 'Cd', 'Rb', 'Sn', 'Sb', 'La', 'Te', 'Ba', 'Ce', 'W', 'Th', 'Nd', 'Sm', 'Tb', 'Yb', 'U', 'Bi'];
 
                 reader.onload = function(e) {
                     const data = new Uint8Array(e.target.result);
